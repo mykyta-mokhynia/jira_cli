@@ -95,12 +95,21 @@ interface AuditUser {
   `,
   styles: [`
     .audit-container {
-      margin-top: 20px;
+      margin-top: 10px;
     }
     .header-actions {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 8px;
+    }
+    .header-actions h2 {
+      color: #222;
+      font-weight: 600;
+    }
+    .header-actions ion-button {
+      --color: #333;
+      --border-color: #d9d9d9;
     }
     .role-group-name {
       font-size: 0.8em;
@@ -108,10 +117,100 @@ interface AuditUser {
     }
     .user-list {
       background: var(--ion-item-background, #fff);
+      padding: 0 !important;
+    }
+    .user-list ion-list {
+      margin: 0;
+      padding: 0;
+      background: #fff;
     }
     .conflict-text {
       color: var(--ion-color-danger);
       font-weight: 500;
+    }
+    .audit-container ion-accordion-group {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .audit-container ion-accordion-group::part(native) {
+      border-color: #e0e0e0;
+    }
+    .audit-container ion-item {
+      --background: #fff;
+      --color: #222;
+      --border-color: #e6e6e6;
+    }
+    .audit-container ion-item::part(native) {
+      color: #222;
+      background: #fff;
+      border-color: #e6e6e6;
+    }
+    .audit-container ion-item.ion-color-light {
+      --background: #f5f5f7;
+      --color: #222;
+    }
+    .audit-container ion-item.ion-color-light::part(native) {
+      color: #222;
+      background: #f5f5f7;
+    }
+    .audit-container ion-item-divider {
+      --background: #f5f5f7;
+      --color: #333;
+    }
+    .audit-container ion-item-divider::part(native) {
+      background: #f5f5f7;
+      color: #333;
+      border-color: #e0e0e0;
+    }
+    .audit-container ion-item-divider ion-label {
+      color: #333;
+    }
+    .audit-container ion-item h3 {
+      color: #222;
+      font-weight: 600;
+    }
+    .audit-container ion-item p {
+      color: #666;
+    }
+    .audit-container ion-label {
+      color: #222;
+    }
+    .audit-container ion-label.ion-color-medium,
+    .audit-container ion-item.ion-color-medium,
+    .audit-container ion-item.ion-color-medium::part(native) {
+      --color: #666;
+      color: #666;
+    }
+    ::ng-deep .audit-container ion-item.ion-color-medium,
+    ::ng-deep .audit-container ion-item.ion-color-medium::part(native),
+    ::ng-deep .audit-container ion-item.ion-color-medium ion-label,
+    ::ng-deep .audit-container ion-label.ion-color-medium {
+      --color: #666 !important;
+      color: #666 !important;
+    }
+    ::ng-deep .audit-container ion-item.ion-color-medium ion-label.ion-color-medium {
+      --color: #666 !important;
+      color: #666 !important;
+    }
+    .audit-container ion-badge {
+      color: #333;
+    }
+    .audit-container ion-badge.ion-color-light {
+      --color: #333;
+      color: #333;
+      background: #f0f0f0;
+    }
+    .audit-container ion-accordion ion-icon {
+      color: #666;
+    }
+    .audit-container ion-accordion ion-icon svg,
+    .audit-container ion-accordion ion-icon svg path {
+      stroke: #666;
+    }
+    .audit-container ion-button {
+      --color: #333;
     }
   `]
 })

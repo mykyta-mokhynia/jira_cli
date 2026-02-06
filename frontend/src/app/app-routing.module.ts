@@ -15,6 +15,10 @@ const routes: Routes = [
     loadComponent: () => import('./space-edit/space-detail/space-detail.component').then(m => m.SpaceDetailComponent)
   },
   {
+    path: 'space-edit/:key/permissions',
+    loadComponent: () => import('./space-edit/space-permissions/space-permissions.component').then(m => m.SpacePermissionsComponent)
+  },
+  {
     path: 'apply-template',
     loadComponent: () => import('./apply-template/apply-template.component').then(m => m.ApplyTemplateComponent)
   },

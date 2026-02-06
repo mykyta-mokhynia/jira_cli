@@ -195,3 +195,33 @@ export const removeProjectRoleUser = async (req: Request, res: Response) => {
         res.status(500).json({ error: error.message || 'Failed to remove user from role' });
     }
 };
+
+export const getProjectConfigSchemes = async (req: Request, res: Response) => {
+    try {
+        const { key } = req.params;
+        const config = await JiraService.getProjectConfigSchemes(key as string);
+        res.json(config);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to fetch project configuration schemes' });
+    }
+};
+
+export const getPermissionSchemeDiff = async (req: Request, res: Response) => {
+    try {
+        const { key } = req.params;
+        const diff = await JiraService.getPermissionSchemeDiff(key as string);
+        res.json(diff);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to fetch permission scheme diff' });
+    }
+};
+
+export const normalizePermissionScheme = async (req: Request, res: Response) => {
+    try {
+        const { key } = req.params;
+        const result = await JiraService.normalizePermissionScheme(key as string);
+        res.json(result);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to normalize permission scheme' });
+    }
+};

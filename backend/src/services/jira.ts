@@ -1138,3 +1138,465 @@ export const removeUserFromProjectRole = async (projectKey: string, role: RoleKe
     const groupName = getProjectGroupName(projectKey, role);
     return removeUserFromGroup(accountId, groupName);
 };
+
+export const getProjectConfigSchemes = async (projectKey: string) => {
+    try {
+        const { jira } = await getJiraClients();
+        console.log(`[ConfigSchemes] Fetching config for ${projectKey}...`);
+
+        // 1. Get Project Basics (ID, Permission Scheme ID, Security Scheme ID)
+        const projectResponse = await jira.projects.getProject({
+            projectIdOrKey: projectKey,
+            expand: ['permissionScheme', 'issueSecurityScheme']
+        });
+        const project = projectResponse as any;
+
+        const projectId = Number(project.id);
+
+        let permissionSchemeId = project.permissionScheme ? Number(project.permissionScheme.id) : null;
+        let securitySchemeId = project.issueSecurityScheme ? Number(project.issueSecurityScheme.id) : null;
+
+        // Fallbacks if schemes are missing in project object
+        if (!permissionSchemeId) {
+            try {
+                const permScheme = await jira.projectPermissionSchemes.getAssignedPermissionScheme({ projectKeyOrId: projectKey });
+                if (permScheme && permScheme.id) permissionSchemeId = Number(permScheme.id);
+            } catch (e) {
+                console.warn(`[ConfigSchemes] Failed to fallback fetch permission scheme for ${projectKey}`, e);
+            }
+        }
+
+        if (!securitySchemeId) {
+            try {
+                const secScheme = await jira.projectPermissionSchemes.getProjectIssueSecurityScheme({ projectKeyOrId: projectKey });
+                if (secScheme && secScheme.id) securitySchemeId = Number(secScheme.id);
+            } catch (e) {
+                console.warn(`[ConfigSchemes] Failed to fallback fetch security scheme for ${projectKey}`, e);
+            }
+        }
+
+        // 2. Fetch all schemes in parallel -> Updated to fetch .Blank for comparison
+        const [
+            permissionSchemeData,
+            securitySchemeData,
+            issueTypeSchemeData,
+            screenSchemeData,
+            fieldConfigSchemeData,
+            blankSchemeData
+        ] = await Promise.all([
+            // Permission Scheme
+            permissionSchemeId
+                ? jira.permissionSchemes.getPermissionScheme({ schemeId: permissionSchemeId })
+                    .catch(e => { console.warn('Failed to fetch permission scheme', e); return null; })
+                : Promise.resolve(null),
+
+            // Security Scheme
+            securitySchemeId
+                ? jira.issueSecuritySchemes.getIssueSecurityScheme({ id: securitySchemeId })
+                    .catch(e => { console.warn('Failed to fetch security scheme', e); return null; })
+                : Promise.resolve(null),
+
+            // Issue Type Scheme
+            jira.issueTypeSchemes.getIssueTypeSchemeForProjects({ projectId: [projectId] })
+                .then(res => (res.values && res.values.length > 0) ? res.values[0] : null)
+                .catch(e => { console.warn('Failed to fetch issue type scheme', e); return null; }),
+
+            // Screen Scheme
+            jira.sendRequestFullResponse({
+                url: '/rest/api/3/issuetypescreenscheme/project',
+                method: 'GET',
+                params: { projectId: projectId }
+            }).then(res => (res.data as any).values?.[0] || null)
+                .catch(e => { console.warn('Failed to fetch screen scheme', e); return null; }),
+
+            // Field Configuration Scheme
+            jira.sendRequestFullResponse({
+                url: '/rest/api/3/fieldconfigurationscheme/project',
+                method: 'GET',
+                params: { projectId: projectId }
+            }).then(res => (res.data as any).values?.[0] || null)
+                .catch(e => { console.warn('Failed to fetch field config scheme', e); return null; }),
+
+            // .Blank Scheme (Reference)
+            jira.permissionSchemes.getAllPermissionSchemes()
+                .then(res => res.permissionSchemes?.find(s => s.name === '.Blank') || null)
+                .then(async (blank) => {
+                    if (blank?.id) {
+                        return jira.permissionSchemes.getPermissionScheme({ schemeId: blank.id });
+                    }
+                    return null;
+                })
+                .catch(e => { console.warn('Failed to fetch .Blank scheme', e); return null; })
+        ]);
+
+        // Compliance Check Logic
+        let isStandard = true;
+        let diffCount = 0;
+
+        if (permissionSchemeData && blankSchemeData && blankSchemeData.permissions) {
+            const currentPerms = new Set(permissionSchemeData.permissions?.map(p =>
+                `${p.permission}:${p.holder?.type}:${p.holder?.parameter || ''}`
+            ) || []);
+            const blankPerms = new Set(blankSchemeData.permissions?.map(p =>
+                `${p.permission}:${p.holder?.type}:${p.holder?.parameter || ''}`
+            ) || []);
+
+            let diffs = 0;
+            // Check missing in current
+            for (const p of blankPerms) {
+                if (!currentPerms.has(p)) diffs++;
+            }
+            // Check extra in current (strict equality)
+            for (const p of currentPerms) {
+                if (!blankPerms.has(p)) diffs++;
+            }
+
+            if (diffs > 0) {
+                isStandard = false;
+                diffCount = diffs;
+            }
+        } else if (!permissionSchemeData) {
+            isStandard = false; // Missing scheme is non-standard
+        }
+
+        return {
+            project: {
+                key: projectKey,
+                name: project.name
+            },
+            permissions: {
+                permissionScheme: permissionSchemeData,
+                securityScheme: securitySchemeData,
+                isStandard,
+                diffCount
+            },
+            types: {
+                issueTypeScheme: issueTypeSchemeData
+            },
+            screens: {
+                screenScheme: screenSchemeData
+            },
+            fields: {
+                fieldConfigScheme: fieldConfigSchemeData
+            }
+        };
+
+    } catch (error: any) {
+        console.error(`Error fetching config schemes for ${projectKey}:`, error);
+        throw error;
+    }
+};
+
+export const getPermissionSchemeDiff = async (projectKey: string) => {
+    try {
+        const { jira } = await getJiraClients();
+        console.log(`[PermDiff] Calculating permission diff for ${projectKey}...`);
+
+        // 1. Get Project & Current Scheme ID
+        const projectResponse = await jira.projects.getProject({
+            projectIdOrKey: projectKey,
+            expand: ['permissionScheme']
+        });
+        const project = projectResponse as any;
+        let permissionSchemeId = project.permissionScheme ? Number(project.permissionScheme.id) : null;
+
+        if (!permissionSchemeId) {
+            try {
+                const permScheme = await jira.projectPermissionSchemes.getAssignedPermissionScheme({ projectKeyOrId: projectKey });
+                if (permScheme && permScheme.id) permissionSchemeId = Number(permScheme.id);
+            } catch (e) { }
+        }
+
+        // 2. Fetch Data in Parallel
+        const [currentScheme, blankScheme, allPermissionsRes, projectRolesRes, fieldsRes] = await Promise.all([
+            permissionSchemeId
+                ? jira.permissionSchemes.getPermissionScheme({ schemeId: permissionSchemeId })
+                : Promise.resolve(null),
+            jira.permissionSchemes.getAllPermissionSchemes()
+                .then(res => res.permissionSchemes?.find(s => s.name === '.Blank') || null)
+                .then(async (blank) => {
+                    if (blank?.id) return jira.permissionSchemes.getPermissionScheme({ schemeId: blank.id });
+                    return null;
+                }),
+            jira.permissions.getAllPermissions(),
+            jira.projectRoles.getProjectRoles({ projectIdOrKey: projectKey })
+                .catch(e => { console.warn('Failed to fetch project roles', e); return {}; }),
+            jira.issueFields.getFields()
+                .catch(e => { console.warn('Failed to fetch fields', e); return []; })
+        ]);
+
+        const allPermissions = Object.values((allPermissionsRes as any).permissions || {}) as any[];
+
+        // Build Maps
+        const roleMap = new Map<string, string>();
+        if (projectRolesRes) {
+            Object.entries(projectRolesRes).forEach(([name, url]) => {
+                // url format: .../role/10002
+                const id = String(url).split('/').pop();
+                if (id) roleMap.set(id, name);
+            });
+        }
+
+        const fieldMap = new Map<string, string>();
+        if (Array.isArray(fieldsRes)) {
+            fieldsRes.forEach((f: any) => {
+                if (f.id && f.name) fieldMap.set(f.id, f.name);
+            });
+        }
+
+        // 3. Process Permissions
+        // Group permissions by category (optional, but good for UI if needed, flat for now)
+        // Map: Permission Key -> { name, description, currentGrants[], blankGrants[], isDifferent }
+
+        const diffResult: any[] = [];
+
+        // Helper to format grant info
+        const formatGrant = (g: any) => {
+            if (!g || !g.holder) return { type: 'unknown', parameter: '', display: 'Unknown' };
+            const type = g.holder.type;
+            const param = g.holder.parameter || g.holder.value || ''; // specific user/group/role ID or name
+
+            // Map types to readable text if possible
+            let displayType = type;
+            let displayParam = param;
+
+            if (type === 'projectRole') {
+                displayType = 'Project Role';
+                if (roleMap.has(param)) {
+                    displayParam = roleMap.get(param);
+                } else if (roleMap.has(String(g.holder.value))) {
+                    // Fallback to value if parameter is missing or different
+                    displayParam = roleMap.get(String(g.holder.value));
+                }
+            }
+            if (type === 'group') displayType = 'Group';
+            if (type === 'user') displayType = 'User';
+            if (type === 'userCustomField') {
+                displayType = 'User Custom Field';
+                if (fieldMap.has(param)) {
+                    displayParam = fieldMap.get(param);
+                }
+            }
+            if (type === 'applicationRole') displayType = 'Application Access';
+            if (type === 'reporter') displayType = 'Reporter';
+            if (type === 'assignee') displayType = 'Current assignee';
+            if (type === 'lead') displayType = 'Project lead';
+
+            return {
+                type,
+                parameter: param,
+                display: displayParam ? `${displayType} (${displayParam})` : displayType
+            };
+        };
+
+        const sortGrants = (a: any, b: any) => a.display.localeCompare(b.display);
+
+
+        const getPermissionCategory = (permissionKey: string): string => {
+            const categories: Record<string, string[]> = {
+                'Project Permissions': ['BROWSE_PROJECTS', 'VIEW_DEV_TOOLS', 'VIEW_READONLY_WORKFLOW'],
+                'Issue Permissions': [
+                    'CREATE_ISSUES', 'EDIT_ISSUES', 'ASSIGN_ISSUES', 'RESOLVE_ISSUES',
+                    'TRANSITION_ISSUES', 'DELETE_ISSUES', 'CLOSE_ISSUES', 'MOVE_ISSUES',
+                    'LINK_ISSUES', 'MODIFY_REPORTER', 'SCHEDULE_ISSUES',
+                    'SET_ISSUE_SECURITY', 'ASSIGNABLE_USER'
+                ],
+                'Voters & Watchers Permissions': ['MANAGE_WATCHERS', 'VIEW_VOTERS_AND_WATCHERS'],
+                'Comments Permissions': [
+                    'ADD_COMMENTS', 'EDIT_ALL_COMMENTS', 'EDIT_OWN_COMMENTS',
+                    'DELETE_ALL_COMMENTS', 'DELETE_OWN_COMMENTS'
+                ],
+                'Attachments Permissions': [
+                    'CREATE_ATTACHMENTS', 'DELETE_ALL_ATTACHMENTS', 'DELETE_OWN_ATTACHMENTS'
+                ],
+                'Time Tracking Permissions': [
+                    'WORK_ON_ISSUES', 'EDIT_OWN_WORKLOGS', 'EDIT_ALL_WORKLOGS',
+                    'DELETE_OWN_WORKLOGS', 'DELETE_ALL_WORKLOGS'
+                ],
+                'Administration Permissions': [
+                    'ADMINISTER_PROJECTS', 'EDIT_WORKFLOW', 'EDIT_ISSUE_LAYOUT'
+                ]
+            };
+
+            for (const [category, keys] of Object.entries(categories)) {
+                if (keys.includes(permissionKey)) return category;
+            }
+            return 'Other Permissions';
+        };
+
+        for (const p of allPermissions) {
+            const key = p.key;
+
+            // Find grants in Current Scheme
+            const currentGrantsRaw = currentScheme?.permissions?.filter(g => g.permission === key) || [];
+            const currentGrants = currentGrantsRaw.map(formatGrant).sort(sortGrants);
+
+            // Find grants in Blank Scheme
+            const blankGrantsRaw = blankScheme?.permissions?.filter(g => g.permission === key) || [];
+            const blankGrants = blankGrantsRaw.map(formatGrant).sort(sortGrants);
+
+            // Compare
+            const currentSet = new Set(currentGrants.map(g => g.display));
+            const blankSet = new Set(blankGrants.map(g => g.display));
+
+            let isDifferent = false;
+            // Check if arrays are different
+            if (currentGrants.length !== blankGrants.length) {
+                isDifferent = true;
+            } else {
+                if (currentSet.size !== blankSet.size) {
+                    isDifferent = true;
+                } else {
+                    for (const item of currentSet) {
+                        if (!blankSet.has(item)) {
+                            isDifferent = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            diffResult.push({
+                key: p.key,
+                name: p.name || p.key,
+                description: p.description,
+                type: p.type, // PROJECT or GLOBAL usually
+                category: getPermissionCategory(p.key),
+                currentGrants,
+                blankGrants,
+                isDifferent
+            });
+        }
+
+        return {
+            project: {
+                key: projectKey,
+                name: project.name
+            },
+            schemeName: currentScheme?.name || 'Unknown',
+            diffs: diffResult
+        };
+
+    } catch (error: any) {
+        console.error(`Error calculating permission diff for ${projectKey}:`, error);
+        throw error;
+    }
+};
+
+export const normalizePermissionScheme = async (projectKey: string) => {
+    const { jira } = await getJiraClients();
+    const targetName = projectKey.toUpperCase();
+
+    const projectResponse = await jira.projects.getProject({
+        projectIdOrKey: projectKey,
+        expand: ['permissionScheme']
+    });
+    const project = projectResponse as any;
+    let schemeId = project.permissionScheme ? Number(project.permissionScheme.id) : null;
+    if (!schemeId) {
+        const assigned = await jira.projectPermissionSchemes.getAssignedPermissionScheme({ projectKeyOrId: projectKey });
+        if (assigned?.id) schemeId = Number(assigned.id);
+    }
+    if (!schemeId) {
+        throw new Error(`Permission scheme not found for ${projectKey}.`);
+    }
+
+    const schemes = await jira.permissionSchemes.getAllPermissionSchemes();
+    const blankScheme = schemes.permissionSchemes?.find((scheme: any) => scheme.name === '.Blank');
+    if (!blankScheme?.id) {
+        throw new Error('Source permission scheme ".Blank" not found.');
+    }
+    const blankDetails = await jira.permissionSchemes.getPermissionScheme({ schemeId: blankScheme.id });
+    const blankPermissions = (blankDetails as any)?.permissions || [];
+
+    const targetScheme = schemes.permissionSchemes?.find((scheme: any) => scheme.name === targetName);
+    if (targetScheme?.id && Number(targetScheme.id) !== schemeId) {
+        await jira.projects.updateProject({
+            projectIdOrKey: projectKey,
+            permissionScheme: targetScheme.id,
+            notifyUsers: false
+        } as any);
+        schemeId = Number(targetScheme.id);
+    }
+
+    let currentScheme = await jira.permissionSchemes.getPermissionScheme({ schemeId });
+    if (currentScheme?.name !== targetName) {
+        await jira.permissionSchemes.updatePermissionScheme({
+            schemeId,
+            name: targetName,
+            description: `Normalized for ${projectKey}`
+        } as any);
+        currentScheme = await jira.permissionSchemes.getPermissionScheme({ schemeId });
+    }
+
+    const currentPermissions = (currentScheme as any)?.permissions || [];
+
+    const normalizeHolder = (holder: any) => {
+        if (!holder) return null;
+        const type = holder.type;
+        const parameter = holder.parameter ?? holder.value ?? '';
+        return { type, parameter };
+    };
+
+    const signature = (permission: string, holder: any) => {
+        const normalized = normalizeHolder(holder);
+        if (!normalized) return null;
+        return `${permission}|${normalized.type}|${normalized.parameter}`;
+    };
+
+    const currentMap = new Map<string, { id?: number; permission?: string; holder?: any }>();
+    for (const grant of currentPermissions) {
+        if (!grant?.permission || !grant?.holder) continue;
+        const sig = signature(grant.permission, grant.holder);
+        if (!sig) continue;
+        currentMap.set(sig, { id: grant.id, permission: grant.permission, holder: grant.holder });
+    }
+
+    const blankSet = new Set<string>();
+    for (const grant of blankPermissions) {
+        if (!grant?.permission || !grant?.holder) continue;
+        const sig = signature(grant.permission, grant.holder);
+        if (!sig) continue;
+        blankSet.add(sig);
+    }
+
+    const toAdd: Array<{ permission: string; holder: any }> = [];
+    blankSet.forEach((sig) => {
+        if (!currentMap.has(sig)) {
+            const [permission, type, parameter] = sig.split('|');
+            const holder: any = { type };
+            if (parameter) holder.parameter = parameter;
+            toAdd.push({ permission, holder });
+        }
+    });
+
+    const toRemove: Array<{ id: number }> = [];
+    currentMap.forEach((value, sig) => {
+        if (!blankSet.has(sig) && value.id) {
+            toRemove.push({ id: value.id });
+        }
+    });
+
+    for (const remove of toRemove) {
+        await jira.permissionSchemes.deletePermissionSchemeEntity({
+            schemeId,
+            permissionId: remove.id
+        });
+    }
+
+    for (const add of toAdd) {
+        await jira.permissionSchemes.createPermissionGrant({
+            schemeId,
+            permission: add.permission,
+            holder: add.holder
+        });
+    }
+
+    return {
+        projectKey,
+        schemeId,
+        schemeName: targetName,
+        added: toAdd.length,
+        removed: toRemove.length
+    };
+};
