@@ -1,0 +1,26 @@
+{
+  "name": "jira-bot-cli",
+  "version": "1.0.0",
+  "description": "Cli for Jira Automation",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "nodemon src/server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.0",
+    "express": "^4.18.2",
+    "jira.js": "^5.2.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.3"
+  }
+}

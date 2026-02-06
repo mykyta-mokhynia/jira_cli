@@ -1,0 +1,39 @@
+.instance-empty {
+  --padding-start: 0;
+  --inner-padding-end: 0;
+  color: var(--ion-color-medium);
+}
+
+.header-avatar {
+  width: 32px;
+  height: 32px;
+  margin-left: 8px;
+}
+
+.header-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.header-avatar-icon {
+  margin-left: 8px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--ion-color-step-200);
+  margin: 16px 0;
+}
+
+.section-title {
+  margin: 0 0 8px 0;
+}
+
+.error-message {
+  margin: 0 0 12px 0;
+}
+
+.hint-text {
+  margin: 4px 0 12px 0;
+}

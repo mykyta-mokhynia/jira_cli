@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+data/
+.DS_Store
+frontend/node_modules/
+frontend/.angular/
+frontend/www/
+backend/dist/
+backend/node_modules/
+backend/.env
+backend/data/*.json
+!backend/data/.keep

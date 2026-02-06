@@ -1,0 +1,17 @@
+ion-col {
+  display: flex;
+}
+
+ion-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  
+  // Ensure the list inside takes available space properly if needed, 
+  // though for just height matching, height: 100% on card is key.
+}
+
+ion-card-content {
+    flex-grow: 1;
+}
